@@ -14,7 +14,7 @@ from detectron2.data import detection_utils as utils
 from detectron2.data import transforms as T
 
 
-__all__ = ["DiffusionDetDatasetMapper"]
+__all__ = ["DiffusionWYKDatasetMapper"]
 
 
 def build_transform_gen(cfg, is_train):
@@ -32,7 +32,9 @@ def build_transform_gen(cfg, is_train):
         max_size = cfg.INPUT.MAX_SIZE_TEST
         sample_style = "choice"
     if sample_style == "range":
-        assert len(min_size) == 2, "more than 2 ({}) min_size(s) are provided for ranges".format(len(min_size))
+        assert (
+            len(min_size) == 2
+        ), "more than 2 ({}) min_size(s) are provided for ranges".format(len(min_size))
 
     logger = logging.getLogger(__name__)
     tfm_gens = []
@@ -46,10 +48,10 @@ def build_transform_gen(cfg, is_train):
     return tfm_gens
 
 
-class DiffusionDetDatasetMapper:
+class DiffusionWYKDatasetMapper:
     """
     A callable which takes a dataset dict in Detectron2 Dataset format,
-    and map it into a format used by DiffusionDet.
+    and map it into a format used by DiffusionWYK.
 
     The callable currently does the following:
 
@@ -60,6 +62,10 @@ class DiffusionDetDatasetMapper:
     """
 
     def __init__(self, cfg, is_train=True):
+
+        self.num_known_train = cfg.MODEL.DiffusionWYK.NUM_KNOWN_TRAIN
+        self.num_known_test = cfg.MODEL.DiffusionWYK.NUM_KNOWN_TEST
+
         if cfg.INPUT.CROP.ENABLED and is_train:
             self.crop_gen = [
                 T.ResizeShortestEdge([400, 500, 600], sample_style="choice"),
@@ -70,7 +76,9 @@ class DiffusionDetDatasetMapper:
 
         self.tfm_gens = build_transform_gen(cfg, is_train)
         logging.getLogger(__name__).info(
-            "Full TransformGens used in training: {}, crop: {}".format(str(self.tfm_gens), str(self.crop_gen))
+            "Full TransformGens used in training: {}, crop: {}".format(
+                str(self.tfm_gens), str(self.crop_gen)
+            )
         )
 
         self.img_format = cfg.INPUT.FORMAT
@@ -103,12 +111,14 @@ class DiffusionDetDatasetMapper:
         # Pytorch's dataloader is efficient on torch.Tensor due to shared-memory,
         # but not efficient on large generic data structures due to the use of pickle & mp.Queue.
         # Therefore it's important to use torch.Tensor.
-        dataset_dict["image"] = torch.as_tensor(np.ascontiguousarray(image.transpose(2, 0, 1)))
+        dataset_dict["image"] = torch.as_tensor(
+            np.ascontiguousarray(image.transpose(2, 0, 1))
+        )
 
-        if not self.is_train:
-            # USER: Modify this if you want to keep them for some reason.
-            dataset_dict.pop("annotations", None)
-            return dataset_dict
+        # if not self.is_train:
+        # USER: Modify this if you want to keep them for some reason.
+        # dataset_dict.pop("annotations", None)
+        # return dataset_dict
 
         if "annotations" in dataset_dict:
             # USER: Modify this if you want to keep them for some reason.
@@ -123,5 +133,18 @@ class DiffusionDetDatasetMapper:
                 if obj.get("iscrowd", 0) == 0
             ]
             instances = utils.annotations_to_instances(annos, image_shape)
+
+            # Add known/unknown mask
+            if not self.is_train:
+                num_known = min(self.num_known_test, len(instances))
+
+                perm = torch.randperm(len(instances))
+                instances = instances[perm]
+                instances.known_mask = torch.zeros(len(instances), dtype=torch.bool)
+
+                instances.known_mask[:num_known] = True
+                instances.known_mask = instances.known_mask[perm.argsort()]
+
             dataset_dict["instances"] = utils.filter_empty_instances(instances)
+
         return dataset_dict

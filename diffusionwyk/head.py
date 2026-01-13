@@ -6,7 +6,7 @@
 #
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
 """
-DiffusionDet Transformer class.
+DiffusionWYK Transformer class.
 
 Copy-paste from torch.nn.Transformer with modifications:
     * positional encodings are passed in MHattention
@@ -46,7 +46,7 @@ class SinusoidalPositionEmbeddings(nn.Module):
 class GaussianFourierProjection(nn.Module):
     """Gaussian random features for encoding time steps."""
 
-    def __init__(self, embed_dim, scale=30.):
+    def __init__(self, embed_dim, scale=30.0):
         super().__init__()
         # Randomly sample weights during initialization. These weights are fixed
         # during optimization and are not trainable.
@@ -76,19 +76,21 @@ class DynamicHead(nn.Module):
         # Build RoI.
         box_pooler = self._init_box_pooler(cfg, roi_input_shape)
         self.box_pooler = box_pooler
-        
+
         # Build heads.
-        num_classes = cfg.MODEL.DiffusionDet.NUM_CLASSES
-        d_model = cfg.MODEL.DiffusionDet.HIDDEN_DIM
-        dim_feedforward = cfg.MODEL.DiffusionDet.DIM_FEEDFORWARD
-        nhead = cfg.MODEL.DiffusionDet.NHEADS
-        dropout = cfg.MODEL.DiffusionDet.DROPOUT
-        activation = cfg.MODEL.DiffusionDet.ACTIVATION
-        num_heads = cfg.MODEL.DiffusionDet.NUM_HEADS
-        rcnn_head = RCNNHead(cfg, d_model, num_classes, dim_feedforward, nhead, dropout, activation)
+        num_classes = cfg.MODEL.DiffusionWYK.NUM_CLASSES
+        d_model = cfg.MODEL.DiffusionWYK.HIDDEN_DIM
+        dim_feedforward = cfg.MODEL.DiffusionWYK.DIM_FEEDFORWARD
+        nhead = cfg.MODEL.DiffusionWYK.NHEADS
+        dropout = cfg.MODEL.DiffusionWYK.DROPOUT
+        activation = cfg.MODEL.DiffusionWYK.ACTIVATION
+        num_heads = cfg.MODEL.DiffusionWYK.NUM_HEADS
+        rcnn_head = RCNNHead(
+            cfg, d_model, num_classes, dim_feedforward, nhead, dropout, activation
+        )
         self.head_series = _get_clones(rcnn_head, num_heads)
         self.num_heads = num_heads
-        self.return_intermediate = cfg.MODEL.DiffusionDet.DEEP_SUPERVISION
+        self.return_intermediate = cfg.MODEL.DiffusionWYK.DEEP_SUPERVISION
 
         # Gaussian random feature embedding layer for time
         self.d_model = d_model
@@ -101,11 +103,11 @@ class DynamicHead(nn.Module):
         )
 
         # Init parameters.
-        self.use_focal = cfg.MODEL.DiffusionDet.USE_FOCAL
-        self.use_fed_loss = cfg.MODEL.DiffusionDet.USE_FED_LOSS
+        self.use_focal = cfg.MODEL.DiffusionWYK.USE_FOCAL
+        self.use_fed_loss = cfg.MODEL.DiffusionWYK.USE_FED_LOSS
         self.num_classes = num_classes
         if self.use_focal or self.use_fed_loss:
-            prior_prob = cfg.MODEL.DiffusionDet.PRIOR_PROB
+            prior_prob = cfg.MODEL.DiffusionWYK.PRIOR_PROB
             self.bias_value = -math.log((1 - prior_prob) / prior_prob)
         self._reset_parameters()
 
@@ -117,7 +119,10 @@ class DynamicHead(nn.Module):
 
             # initialize the bias for focal loss and fed loss.
             if self.use_focal or self.use_fed_loss:
-                if p.shape[-1] == self.num_classes or p.shape[-1] == self.num_classes + 1:
+                if (
+                    p.shape[-1] == self.num_classes
+                    or p.shape[-1] == self.num_classes + 1
+                ):
                     nn.init.constant_(p, self.bias_value)
 
     @staticmethod
@@ -159,9 +164,11 @@ class DynamicHead(nn.Module):
             proposal_features = init_features.clone()
         else:
             proposal_features = None
-        
+
         for head_idx, rcnn_head in enumerate(self.head_series):
-            class_logits, pred_bboxes, proposal_features = rcnn_head(features, bboxes, proposal_features, self.box_pooler, time)
+            class_logits, pred_bboxes, proposal_features = rcnn_head(
+                features, bboxes, proposal_features, self.box_pooler, time
+            )
             if self.return_intermediate:
                 inter_class_logits.append(class_logits)
                 inter_pred_bboxes.append(pred_bboxes)
@@ -175,8 +182,18 @@ class DynamicHead(nn.Module):
 
 class RCNNHead(nn.Module):
 
-    def __init__(self, cfg, d_model, num_classes, dim_feedforward=2048, nhead=8, dropout=0.1, activation="relu",
-                 scale_clamp: float = _DEFAULT_SCALE_CLAMP, bbox_weights=(2.0, 2.0, 1.0, 1.0)):
+    def __init__(
+        self,
+        cfg,
+        d_model,
+        num_classes,
+        dim_feedforward=2048,
+        nhead=8,
+        dropout=0.1,
+        activation="relu",
+        scale_clamp: float = _DEFAULT_SCALE_CLAMP,
+        bbox_weights=(2.0, 2.0, 1.0, 1.0),
+    ):
         super().__init__()
 
         self.d_model = d_model
@@ -199,10 +216,12 @@ class RCNNHead(nn.Module):
         self.activation = _get_activation_fn(activation)
 
         # block time mlp
-        self.block_time_mlp = nn.Sequential(nn.SiLU(), nn.Linear(d_model * 4, d_model * 2))
+        self.block_time_mlp = nn.Sequential(
+            nn.SiLU(), nn.Linear(d_model * 4, d_model * 2)
+        )
 
         # cls.
-        num_cls = cfg.MODEL.DiffusionDet.NUM_CLS
+        num_cls = cfg.MODEL.DiffusionWYK.NUM_CLS
         cls_module = list()
         for _ in range(num_cls):
             cls_module.append(nn.Linear(d_model, d_model, False))
@@ -211,17 +230,17 @@ class RCNNHead(nn.Module):
         self.cls_module = nn.ModuleList(cls_module)
 
         # reg.
-        num_reg = cfg.MODEL.DiffusionDet.NUM_REG
+        num_reg = cfg.MODEL.DiffusionWYK.NUM_REG
         reg_module = list()
         for _ in range(num_reg):
             reg_module.append(nn.Linear(d_model, d_model, False))
             reg_module.append(nn.LayerNorm(d_model))
             reg_module.append(nn.ReLU(inplace=True))
         self.reg_module = nn.ModuleList(reg_module)
-        
+
         # pred.
-        self.use_focal = cfg.MODEL.DiffusionDet.USE_FOCAL
-        self.use_fed_loss = cfg.MODEL.DiffusionDet.USE_FED_LOSS
+        self.use_focal = cfg.MODEL.DiffusionWYK.USE_FOCAL
+        self.use_fed_loss = cfg.MODEL.DiffusionWYK.USE_FED_LOSS
         if self.use_focal or self.use_fed_loss:
             self.class_logits = nn.Linear(d_model, num_classes)
         else:
@@ -237,7 +256,7 @@ class RCNNHead(nn.Module):
         """
 
         N, nr_boxes = bboxes.shape[:2]
-        
+
         # roi_feature.
         proposal_boxes = list()
         for b in range(N):
@@ -247,25 +266,35 @@ class RCNNHead(nn.Module):
         if pro_features is None:
             pro_features = roi_features.view(N, nr_boxes, self.d_model, -1).mean(-1)
 
-        roi_features = roi_features.view(N * nr_boxes, self.d_model, -1).permute(2, 0, 1)
+        roi_features = roi_features.view(N * nr_boxes, self.d_model, -1).permute(
+            2, 0, 1
+        )
 
         # self_att.
         pro_features = pro_features.view(N, nr_boxes, self.d_model).permute(1, 0, 2)
-        pro_features2 = self.self_attn(pro_features, pro_features, value=pro_features)[0]
+        pro_features2 = self.self_attn(pro_features, pro_features, value=pro_features)[
+            0
+        ]
         pro_features = pro_features + self.dropout1(pro_features2)
         pro_features = self.norm1(pro_features)
 
         # inst_interact.
-        pro_features = pro_features.view(nr_boxes, N, self.d_model).permute(1, 0, 2).reshape(1, N * nr_boxes, self.d_model)
+        pro_features = (
+            pro_features.view(nr_boxes, N, self.d_model)
+            .permute(1, 0, 2)
+            .reshape(1, N * nr_boxes, self.d_model)
+        )
         pro_features2 = self.inst_interact(pro_features, roi_features)
         pro_features = pro_features + self.dropout2(pro_features2)
         obj_features = self.norm2(pro_features)
 
         # obj_feature.
-        obj_features2 = self.linear2(self.dropout(self.activation(self.linear1(obj_features))))
+        obj_features2 = self.linear2(
+            self.dropout(self.activation(self.linear1(obj_features)))
+        )
         obj_features = obj_features + self.dropout3(obj_features2)
         obj_features = self.norm3(obj_features)
-        
+
         fc_feature = obj_features.transpose(0, 1).reshape(N * nr_boxes, -1)
 
         scale_shift = self.block_time_mlp(time_emb)
@@ -282,8 +311,12 @@ class RCNNHead(nn.Module):
         class_logits = self.class_logits(cls_feature)
         bboxes_deltas = self.bboxes_delta(reg_feature)
         pred_bboxes = self.apply_deltas(bboxes_deltas, bboxes.view(-1, 4))
-        
-        return class_logits.view(N, nr_boxes, -1), pred_bboxes.view(N, nr_boxes, -1), obj_features
+
+        return (
+            class_logits.view(N, nr_boxes, -1),
+            pred_bboxes.view(N, nr_boxes, -1),
+            obj_features,
+        )
 
     def apply_deltas(self, deltas, boxes):
         """
@@ -331,11 +364,13 @@ class DynamicConv(nn.Module):
     def __init__(self, cfg):
         super().__init__()
 
-        self.hidden_dim = cfg.MODEL.DiffusionDet.HIDDEN_DIM
-        self.dim_dynamic = cfg.MODEL.DiffusionDet.DIM_DYNAMIC
-        self.num_dynamic = cfg.MODEL.DiffusionDet.NUM_DYNAMIC
+        self.hidden_dim = cfg.MODEL.DiffusionWYK.HIDDEN_DIM
+        self.dim_dynamic = cfg.MODEL.DiffusionWYK.DIM_DYNAMIC
+        self.num_dynamic = cfg.MODEL.DiffusionWYK.NUM_DYNAMIC
         self.num_params = self.hidden_dim * self.dim_dynamic
-        self.dynamic_layer = nn.Linear(self.hidden_dim, self.num_dynamic * self.num_params)
+        self.dynamic_layer = nn.Linear(
+            self.hidden_dim, self.num_dynamic * self.num_params
+        )
 
         self.norm1 = nn.LayerNorm(self.dim_dynamic)
         self.norm2 = nn.LayerNorm(self.hidden_dim)
@@ -343,20 +378,24 @@ class DynamicConv(nn.Module):
         self.activation = nn.ReLU(inplace=True)
 
         pooler_resolution = cfg.MODEL.ROI_BOX_HEAD.POOLER_RESOLUTION
-        num_output = self.hidden_dim * pooler_resolution ** 2
+        num_output = self.hidden_dim * pooler_resolution**2
         self.out_layer = nn.Linear(num_output, self.hidden_dim)
         self.norm3 = nn.LayerNorm(self.hidden_dim)
 
     def forward(self, pro_features, roi_features):
-        '''
+        """
         pro_features: (1,  N * nr_boxes, self.d_model)
         roi_features: (49, N * nr_boxes, self.d_model)
-        '''
+        """
         features = roi_features.permute(1, 0, 2)
         parameters = self.dynamic_layer(pro_features).permute(1, 0, 2)
 
-        param1 = parameters[:, :, :self.num_params].view(-1, self.hidden_dim, self.dim_dynamic)
-        param2 = parameters[:, :, self.num_params:].view(-1, self.dim_dynamic, self.hidden_dim)
+        param1 = parameters[:, :, : self.num_params].view(
+            -1, self.hidden_dim, self.dim_dynamic
+        )
+        param2 = parameters[:, :, self.num_params :].view(
+            -1, self.dim_dynamic, self.hidden_dim
+        )
 
         features = torch.bmm(features, param1)
         features = self.norm1(features)
@@ -386,4 +425,4 @@ def _get_activation_fn(activation):
         return F.gelu
     if activation == "glu":
         return F.glu
-    raise RuntimeError(F"activation should be relu/gelu, not {activation}.")
+    raise RuntimeError(f"activation should be relu/gelu, not {activation}.")
