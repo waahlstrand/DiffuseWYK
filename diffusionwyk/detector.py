@@ -19,7 +19,6 @@ from detectron2.layers import batched_nms
 from detectron2.modeling import META_ARCH_REGISTRY, build_backbone, detector_postprocess
 
 from detectron2.structures import Boxes, ImageList, Instances
-from detectron2.utils.visualizer import ColorMode, Visualizer
 
 from .loss import SetCriterionDynamicK, HungarianMatcherDynamicK
 from .head import DynamicHead
