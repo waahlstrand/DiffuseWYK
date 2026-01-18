@@ -1008,11 +1008,9 @@ class DiffusionWYK(DiffusionDetBase):
             zip(times[:-1], times[1:])
         )  # [(T-1, T-2), (T-2, T-3), ..., (1, 0), (0, -1)]
 
-        img = torch.randn(shape, device=self.device)
-
         # Get known boxes from batched_inputs via the 'instances' and 'known_mask' field
-
         if self.num_known_test > 0:
+
             known_boxes_batch = []
             for i, bi in enumerate(batched_inputs):
 
@@ -1035,6 +1033,9 @@ class DiffusionWYK(DiffusionDetBase):
 
         known_boxes_batch = torch.stack(known_boxes_batch)
 
+        # Randomly initialize the starting boxes as standard normal
+        img = torch.randn(shape, device=self.device)
+
         # Insert known boxes into the initial noisy image
         if self.num_known_test > 0:
             for i in range(batch):
@@ -1053,6 +1054,33 @@ class DiffusionWYK(DiffusionDetBase):
 
                     # Insert known boxes into the initial noisy set
                     img[i, :num_known_boxes, :] = known_boxes
+
+        # Alternatively: Initialize the starting boxes as noisy versions of known boxes
+        # (uncomment the following block to use this initialization method)
+        # if self.num_known_test > 0:
+        #     for i in range(batch):
+        #         known_boxes = known_boxes_batch[i]
+        #         num_known_boxes = known_boxes.shape[0]
+        #         if num_known_boxes > 0:
+        #             known_boxes_normalized = box_normalize_xyxy(
+        #                 known_boxes, w=images_whwh[i, 0], h=images_whwh[i, 1]
+        #             )
+        #             known_boxes_cxcywh = box_xyxy_to_cxcywh(known_boxes_normalized)
+        #             known_boxes_model_space = (
+        #                 known_boxes_cxcywh * 2.0 - 1.0
+        #             ) * self.scale
+        #             noise = torch.randn_like(known_boxes_model_space)
+        #             noisy_known_boxes = self.q_sample(
+        #                 x_start=known_boxes_model_space,
+        #                 t=torch.full(
+        #                     (num_known_boxes,),
+        #                     total_timesteps - 1,
+        #                     device=self.device,
+        #                     dtype=torch.long,
+        #                 ),
+        #                 noise=noise,
+        #             )
+        #             img[i, :num_known_boxes, :] = noisy_known_boxes
 
         ensemble_score, ensemble_label, ensemble_coord = [], [], []
         x_start = None
