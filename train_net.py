@@ -52,7 +52,11 @@ from diffusionwyk.util.model_ema import (
     apply_model_ema_and_restore,
     EMADetectionCheckpointer,
 )
-from detectron2.data.datasets import register_coco_instances
+
+from diffusionwyk.evaluation import KnownBoxFilteredCOCOEvaluator
+
+# from detectron2.data.datasets import register_coco_instances
+from diffusionwyk.dataset_mapper import register_coco_instances_diffusionwyk
 
 
 class Trainer(DefaultTrainer):
@@ -130,7 +134,8 @@ class Trainer(DefaultTrainer):
         if "lvis" in dataset_name:
             return LVISEvaluator(dataset_name, cfg, True, output_folder)
         else:
-            return COCOEvaluator(dataset_name, cfg, True, output_folder)
+            # return COCOEvaluator(dataset_name, cfg, True, output_folder)
+            return KnownBoxFilteredCOCOEvaluator(dataset_name, cfg, True, output_folder)
 
     @classmethod
     def build_train_loader(cls, cfg):
@@ -299,13 +304,13 @@ def setup(args):
 
 def main(args):
 
-    register_coco_instances(
+    register_coco_instances_diffusionwyk(
         args.dataset_name + "_train",
         {},
         args.train_json_file,
         args.train_image_root,
     )
-    register_coco_instances(
+    register_coco_instances_diffusionwyk(
         args.dataset_name + "_val",
         {},
         args.val_json_file,

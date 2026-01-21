@@ -9,9 +9,23 @@ import copy
 import logging
 import numpy as np
 import torch
+import os
 
 from detectron2.data import detection_utils as utils
 from detectron2.data import transforms as T
+from detectron2.structures import (
+    BoxMode,
+    BitMasks,
+    Keypoints,
+    Boxes,
+    PolygonMasks,
+    Instances,
+)
+from detectron2.structures import polygons_to_bitmask
+from detectron2.data.detection_utils import transform_keypoint_annotations
+import pycocotools.mask as mask_util
+from detectron2.data import DatasetCatalog, MetadataCatalog
+from detectron2.data.datasets.coco import load_coco_json
 
 
 __all__ = ["DiffusionWYKDatasetMapper"]
@@ -134,17 +148,49 @@ class DiffusionWYKDatasetMapper:
             ]
             instances = utils.annotations_to_instances(annos, image_shape)
 
-            # Add known/unknown mask
-            if not self.is_train:
-                num_known = min(self.num_known_test, len(instances))
-
-                perm = torch.randperm(len(instances))
-                instances = instances[perm]
-                instances.known_mask = torch.zeros(len(instances), dtype=torch.bool)
-
-                instances.known_mask[:num_known] = True
-                instances.known_mask = instances.known_mask[perm.argsort()]
+            # Annotations have a "known" field indicating whether the box is known
+            # Add known/unknown mask based on the known field
+            known_flags = torch.tensor(
+                [obj.get("known", False) for obj in annos], dtype=torch.bool
+            )
+            instances.known_mask = known_flags
 
             dataset_dict["instances"] = utils.filter_empty_instances(instances)
 
         return dataset_dict
+
+
+def register_coco_instances_diffusionwyk(name, metadata, json_file, image_root):
+    """
+    Register a dataset in COCO's json annotation format for
+    instance detection, instance segmentation and keypoint detection.
+    (i.e., Type 1 and 2 in http://cocodataset.org/#format-data.
+    `instances*.json` and `person_keypoints*.json` in the dataset).
+
+    This is an example of how to register a new dataset.
+    You can do something similar to this function, to register new datasets.
+
+    Args:
+        name (str): the name that identifies a dataset, e.g. "coco_2014_train".
+        metadata (dict): extra metadata associated with this dataset.  You can
+            leave it as an empty dict.
+        json_file (str): path to the json instance annotation file.
+        image_root (str or path-like): directory which contains all the images.
+    """
+    assert isinstance(name, str), name
+    assert isinstance(json_file, (str, os.PathLike)), json_file
+    assert isinstance(image_root, (str, os.PathLike)), image_root
+    # 1. register a function which returns dicts
+    if name not in DatasetCatalog:
+        DatasetCatalog.register(
+            name,
+            lambda: load_coco_json(
+                json_file, image_root, name, extra_annotation_keys=["known"]
+            ),
+        )
+
+    # 2. Optionally, add metadata about this dataset,
+    # since they might be useful in evaluation, visualization or logging
+    MetadataCatalog.get(name).set(
+        json_file=json_file, image_root=image_root, evaluator_type="coco", **metadata
+    )
