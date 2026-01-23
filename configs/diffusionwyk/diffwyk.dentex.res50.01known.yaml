@@ -1,0 +1,24 @@
+_BASE_: "Base-DiffusionWYK.yaml"
+MODEL:
+  WEIGHTS: "detectron2://ImageNetPretrained/torchvision/R-50.pkl"
+  RESNETS:
+    DEPTH: 50
+    STRIDE_IN_1X1: False
+  DiffusionWYK:
+    NUM_PROPOSALS: 1000
+    NUM_CLASSES: 4
+    NUM_KNOWN_TRAIN: 0
+    NUM_KNOWN_TEST: 1
+    NUM_TEST_PROPOSALS: 50
+    SAMPLE_STEP: 4
+DATASETS:
+  TRAIN: ("dentex_train",)
+  TEST:  ("dentex_val",)
+SOLVER:
+  STEPS: (350000, 420000)
+  MAX_ITER: 400000
+INPUT:
+  CROP:
+    ENABLED: True
+  FORMAT: "RGB"
+OUTPUT_DIR: "output_wyk_01known"

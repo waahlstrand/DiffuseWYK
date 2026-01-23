@@ -15,8 +15,11 @@ def add_diffusionwyk_config(cfg):
     cfg.MODEL.DiffusionWYK = CN()
     cfg.MODEL.DiffusionWYK.NUM_CLASSES = 80
     cfg.MODEL.DiffusionWYK.NUM_PROPOSALS = 300
+
+    # Additions from DiffusionDet
     cfg.MODEL.DiffusionWYK.NUM_KNOWN_TRAIN = 1
     cfg.MODEL.DiffusionWYK.NUM_KNOWN_TEST = 1
+    cfg.MODEL.DiffusionWYK.NUM_TEST_PROPOSALS = 100
 
     # RCNN Head.
     cfg.MODEL.DiffusionWYK.NHEADS = 8

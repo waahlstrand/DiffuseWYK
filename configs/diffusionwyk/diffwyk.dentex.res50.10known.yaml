@@ -1,0 +1,29 @@
+_BASE_: "Base-DiffusionWYK.yaml"
+MODEL:
+  WEIGHTS: "detectron2://ImageNetPretrained/torchvision/R-50.pkl"
+  RESNETS:
+    DEPTH: 50
+    STRIDE_IN_1X1: False
+  DiffusionWYK:
+    NUM_PROPOSALS: 500
+    NUM_CLASSES: 4
+    NUM_KNOWN_TRAIN: 1
+    NUM_KNOWN_TEST: 0
+DATASETS:
+  TRAIN: ("dentex_train",)
+  TEST:  ("dentex_val",)
+SOLVER:
+  STEPS: (350000, 420000)
+  MAX_ITER: 400000
+INPUT:
+  CROP:
+    ENABLED: True
+  FORMAT: "RGB"
+OUTPUT_DIR: "output_wyk_10"
+
+# Test
+# AP,AP50,AP75,APs,APm,APl
+# Base
+# 32.0243,48.9750,37.3562,nan,60.0000,32.1680 
+# Privileged
+# 34.0507,51.0226,41.2940,nan,60.0000,34.1346
