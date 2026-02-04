@@ -76,7 +76,6 @@ class DiffusionDetBase(nn.Module):
         self.num_proposals = cfg.MODEL.DiffusionWYK.NUM_PROPOSALS
         self.hidden_dim = cfg.MODEL.DiffusionWYK.HIDDEN_DIM
         self.num_heads = cfg.MODEL.DiffusionWYK.NUM_HEADS
-        self.num_test_proposals = cfg.MODEL.DiffusionWYK.NUM_TEST_PROPOSALS
 
         # Build Backbone.
         self.backbone = build_backbone(cfg)
@@ -785,10 +784,14 @@ class DiffusionWYK(DiffusionDetBase):
             else:
                 x_start = gt_boxes
 
-            # choose known indices among the gt portion (0 .. num_gt-1)
+            # choose random known indices among the gt portion (0 .. num_gt-1)
             if num_known > 0:
+                max_known = min(num_known, num_gt)
+                num_known_to_select = torch.randint(
+                    0, max_known + 1, (1,), device=self.device
+                ).item()
                 perm = torch.randperm(num_gt, device=self.device)
-                known_idx = perm[:num_known]
+                known_idx = perm[:num_known_to_select]
             else:
                 known_idx = torch.empty((0,), dtype=torch.long, device=self.device)
 
@@ -896,6 +899,15 @@ class DiffusionWYK(DiffusionDetBase):
                         known_boxes_rep_cxcywh * 2.0 - 1.0
                     ) * self.scale
                     known_boxes_noisy = known_boxes_rep_cxcywh
+
+                    if self.known_noise_level > 0:
+                        # Add initial noise to known boxes
+                        noise_init = (
+                            torch.randn(known_boxes_rep.shape[0], 4, device=self.device)
+                            * self.known_noise_level
+                        )
+                        known_boxes_noisy += noise_init
+
                     known_boxes_noisy = self.q_sample(
                         x_start=known_boxes_rep_cxcywh,
                         t=torch.full(
