@@ -1,5 +1,6 @@
 # ========================================
 # Modified by Shoufa Chen
+# Modified by Victor Wåhlstrand
 # ========================================
 # Modified by Peize Sun, Rufeng Zhang
 # Contact: {sunpeize, cxrfzhang}@foxmail.com
@@ -76,9 +77,6 @@ class DiffusionWYKDatasetMapper:
     """
 
     def __init__(self, cfg, is_train=True):
-
-        self.num_known_train = cfg.MODEL.DiffusionWYK.NUM_KNOWN_TRAIN
-        self.num_known_test = cfg.MODEL.DiffusionWYK.NUM_KNOWN_TEST
 
         if cfg.INPUT.CROP.ENABLED and is_train:
             self.crop_gen = [
