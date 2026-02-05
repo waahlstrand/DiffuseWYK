@@ -906,17 +906,18 @@ class DiffusionWYK(DiffusionDetBase):
                         )
                         known_boxes_rep_cxcywh += noise_init
 
-                    known_boxes_rep = torch.clamp(
-                        known_boxes_rep_cxcywh, min=-1 * self.scale, max=self.scale
-                    )
-                    known_boxes_rep = ((known_boxes_rep / self.scale) + 1) / 2.0
-
                     noise = torch.randn(known_boxes_rep.shape[0], 4, device=self.device)
                     known_boxes_noisy = self.q_sample(
                         x_start=known_boxes_rep_cxcywh,
                         t=torch.full((shape[0],), times[0], device=self.device),
                         noise=noise,
                     )
+
+                    known_boxes_noisy = torch.clamp(
+                        known_boxes_noisy, min=-1 * self.scale, max=self.scale
+                    )
+                    known_boxes_noisy = ((known_boxes_noisy / self.scale) + 1) / 2.0
+
                     # Insert noisy known boxes into img
                     img[i, :num_test_proposals, :] = known_boxes_noisy
 
