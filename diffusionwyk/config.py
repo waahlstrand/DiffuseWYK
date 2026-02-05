@@ -20,6 +20,8 @@ def add_diffusionwyk_config(cfg):
     cfg.MODEL.DiffusionWYK.NUM_KNOWN_TRAIN = 1
     cfg.MODEL.DiffusionWYK.NUM_KNOWN_TEST = 1
     cfg.MODEL.DiffusionWYK.NUM_TEST_PROPOSALS = 100
+    cfg.MODEL.DiffusionWYK.KNOWN_NOISE_LEVEL = 0.0
+    cfg.MODEL.DiffusionWYK.ETA = 1.0
 
     # RCNN Head.
     cfg.MODEL.DiffusionWYK.NHEADS = 8
