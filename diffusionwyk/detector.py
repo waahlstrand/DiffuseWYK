@@ -890,7 +890,6 @@ class DiffusionWYK(DiffusionDetBase):
                     num_test_proposals = self.num_test_proposals * num_known_boxes
 
                     # Forward diffusion to add noise
-                    noise = torch.randn(known_boxes_rep.shape[0], 4, device=self.device)
                     known_boxes_normalized = box_normalize_xyxy(
                         known_boxes_rep, w=images_whwh[i, 0], h=images_whwh[i, 1]
                     )
@@ -898,7 +897,6 @@ class DiffusionWYK(DiffusionDetBase):
                     known_boxes_rep_cxcywh = (
                         known_boxes_rep_cxcywh * 2.0 - 1.0
                     ) * self.scale
-                    known_boxes_noisy = known_boxes_rep_cxcywh
 
                     if self.known_noise_level > 0:
                         # Add initial noise to known boxes
@@ -906,13 +904,17 @@ class DiffusionWYK(DiffusionDetBase):
                             torch.randn(known_boxes_rep.shape[0], 4, device=self.device)
                             * self.known_noise_level
                         )
-                        known_boxes_noisy += noise_init
+                        known_boxes_rep_cxcywh += noise_init
 
+                    known_boxes_rep = torch.clamp(
+                        known_boxes_rep_cxcywh, min=-1 * self.scale, max=self.scale
+                    )
+                    known_boxes_rep = ((known_boxes_rep / self.scale) + 1) / 2.0
+
+                    noise = torch.randn(known_boxes_rep.shape[0], 4, device=self.device)
                     known_boxes_noisy = self.q_sample(
                         x_start=known_boxes_rep_cxcywh,
-                        t=torch.full(
-                            (shape[0],), sampling_timesteps - 1, device=self.device
-                        ),
+                        t=torch.full((shape[0],), times[0], device=self.device),
                         noise=noise,
                     )
                     # Insert noisy known boxes into img
