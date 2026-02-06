@@ -853,7 +853,7 @@ class DiffusionWYK(DiffusionDetBase):
         # Get known boxes from batched_inputs via the 'instances' and 'known_mask' field
         if self.num_known_test > 0:
 
-            known_boxes_batch = []
+            x_known_batch = []
             for i, bi in enumerate(batched_inputs):
 
                 assert (
@@ -866,60 +866,64 @@ class DiffusionWYK(DiffusionDetBase):
                 ), "Instances must have 'known_mask' field for known boxes."
                 known_mask = instances.known_mask
                 known_boxes = instances.gt_boxes.tensor[known_mask].to(self.device)
-                known_boxes_batch.append(known_boxes)
+                x_known_batch.append(known_boxes)
         else:
             # Add empty known boxes if no known boxes are specified
-            known_boxes_batch = [
+            x_known_batch = [
                 torch.empty((0, 4), device=self.device) for _ in range(batch)
             ]
 
-        known_boxes_batch = torch.stack(known_boxes_batch)
-
+        x_known_batch = torch.stack(x_known_batch)
         # Randomly initialize the starting boxes as standard normal
-        img = torch.randn(shape, device=self.device)
+        x = torch.randn(shape, device=self.device)
 
         # Add a distribution of noisy known boxes into img at each step
         if self.num_known_test > 0 and self.num_test_proposals > 0:
             for i in range(batch):
-                known_boxes = known_boxes_batch[i]
-                num_known_boxes = known_boxes.shape[0]
+                x_known = x_known_batch[i]
+                num_known_boxes = x_known.shape[0]
+                h = images_whwh[i, 1]
+                w = images_whwh[i, 0]
                 if num_known_boxes > 0:
-                    known_boxes_rep = known_boxes.repeat(
+                    x_known = x_known.repeat(
                         self.num_test_proposals, 1
                     )  # (num_known_boxes * N, 4)
                     num_test_proposals = self.num_test_proposals * num_known_boxes
 
                     # Forward diffusion to add noise
-                    known_boxes_normalized = box_normalize_xyxy(
-                        known_boxes_rep, w=images_whwh[i, 0], h=images_whwh[i, 1]
-                    )
-                    known_boxes_rep_cxcywh = box_xyxy_to_cxcywh(known_boxes_normalized)
-                    known_boxes_rep_cxcywh = (
-                        known_boxes_rep_cxcywh * 2.0 - 1.0
-                    ) * self.scale
+                    x_known = box_normalize_xyxy(x_known, w=w, h=h)
+                    x_known = box_xyxy_to_cxcywh(x_known)
+                    x_known = (x_known * 2.0 - 1.0) * self.scale
 
                     if self.known_noise_level > 0:
                         # Add initial noise to known boxes
                         noise_init = (
-                            torch.randn(known_boxes_rep.shape[0], 4, device=self.device)
+                            torch.randn(x_known.shape[0], 4, device=self.device)
                             * self.known_noise_level
                         )
-                        known_boxes_rep_cxcywh += noise_init
+                        x_known += noise_init
 
-                    noise = torch.randn(known_boxes_rep.shape[0], 4, device=self.device)
-                    known_boxes_noisy = self.q_sample(
-                        x_start=known_boxes_rep_cxcywh,
-                        t=torch.full((shape[0],), times[0], device=self.device),
+                    noise = torch.randn(x_known.shape[0], 4, device=self.device)
+                    x_known_noisy = self.q_sample(
+                        x_start=x_known,
+                        t=torch.full(
+                            (x_known.shape[0],),
+                            times[0],
+                            device=self.device,
+                        ),
                         noise=noise,
                     )
 
-                    known_boxes_noisy = torch.clamp(
-                        known_boxes_noisy, min=-1 * self.scale, max=self.scale
+                    x_known_noisy = torch.clamp(
+                        x_known_noisy, min=-1 * self.scale, max=self.scale
                     )
-                    known_boxes_noisy = ((known_boxes_noisy / self.scale) + 1) / 2.0
+                    x_known_noisy = ((x_known_noisy / self.scale) + 1) / 2.0
 
-                    # Insert noisy known boxes into img
-                    img[i, :num_test_proposals, :] = known_boxes_noisy
+                    # Insert noisy known boxes into x
+                    assert (
+                        num_test_proposals <= self.num_proposals
+                    ), "num_test_proposals must be <= num_proposals"
+                    x[i, :num_test_proposals, :] = x_known_noisy
 
         ensemble_score, ensemble_label, ensemble_coord = [], [], []
         x_start = None
@@ -931,7 +935,7 @@ class DiffusionWYK(DiffusionDetBase):
             preds, outputs_class, outputs_coord = self.model_predictions(
                 backbone_feats,
                 images_whwh,
-                img,
+                x,
                 time_cond,
                 self_cond,
                 clip_x_start=clip_denoised,
@@ -946,15 +950,19 @@ class DiffusionWYK(DiffusionDetBase):
                 threshold = 0.5
                 score_per_image = torch.sigmoid(score_per_image)
                 value, _ = torch.max(score_per_image, -1, keepdim=False)
-                keep_idx = value > threshold
+                keep_idx = (
+                    value
+                    > threshold | torch.arange(x.shape[1], device=x.device)
+                    < self.num_test_proposals
+                )  # keep all boxes above threshold, plus the known boxes (first num_test_proposals entries)
 
                 num_remain = torch.sum(keep_idx)
 
                 pred_noise = pred_noise[:, keep_idx, :]
                 x_start = x_start[:, keep_idx, :]
-                img = img[:, keep_idx, :]
+                x = x[:, keep_idx, :]
             if time_next < 0:
-                img = x_start
+                x = x_start
                 continue
 
             alpha = self.alphas_cumprod[time]
@@ -965,17 +973,17 @@ class DiffusionWYK(DiffusionDetBase):
             )
             c = (1 - alpha_next - sigma**2).sqrt()
 
-            noise = torch.randn_like(img)
+            noise = torch.randn_like(x)
 
-            img = x_start * alpha_next.sqrt() + c * pred_noise + sigma * noise
+            x = x_start * alpha_next.sqrt() + c * pred_noise + sigma * noise
 
             if self.box_renewal:  # filter
                 # replenish with randn boxes
-                img = torch.cat(
+                x = torch.cat(
                     (
-                        img,
+                        x,
                         torch.randn(
-                            1, self.num_proposals - num_remain, 4, device=img.device
+                            1, self.num_proposals - num_remain, 4, device=x.device
                         ),
                     ),
                     dim=1,
