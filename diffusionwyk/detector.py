@@ -950,10 +950,8 @@ class DiffusionWYK(DiffusionDetBase):
                 threshold = 0.5
                 score_per_image = torch.sigmoid(score_per_image)
                 value, _ = torch.max(score_per_image, -1, keepdim=False)
-                keep_idx = (
-                    value
-                    > threshold | torch.arange(x.shape[1], device=x.device)
-                    < self.num_test_proposals
+                keep_idx = (value > threshold) | (
+                    torch.arange(x.shape[1], dtype=torch.long) < self.num_test_proposals
                 )  # keep all boxes above threshold, plus the known boxes (first num_test_proposals entries)
 
                 num_remain = torch.sum(keep_idx)
