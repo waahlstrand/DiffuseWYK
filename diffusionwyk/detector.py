@@ -879,51 +879,29 @@ class DiffusionWYK(DiffusionDetBase):
 
         # Add a distribution of noisy known boxes into img at each step
         if self.num_known_test > 0 and self.num_test_proposals > 0:
-            for i in range(batch):
-                x_known = x_known_batch[i]
-                num_known_boxes = x_known.shape[0]
-                h = images_whwh[i, 1]
-                w = images_whwh[i, 0]
-                if num_known_boxes > 0:
-                    x_known = x_known.repeat(
-                        self.num_test_proposals, 1
-                    )  # (num_known_boxes * N, 4)
-                    num_test_proposals = self.num_test_proposals * num_known_boxes
+            num_known_boxes = x_known_batch.shape[1]
 
-                    # Forward diffusion to add noise
-                    x_known = box_normalize_xyxy(x_known, w=w, h=h)
-                    x_known = box_xyxy_to_cxcywh(x_known)
-                    x_known = (x_known * 2.0 - 1.0) * self.scale
+            if num_known_boxes > 0:
+                # Repeat known boxes for all batch items: (batch, num_known, 4) -> (batch, num_known * num_test_proposals, 4)
+                x_known = x_known_batch.repeat(1, self.num_test_proposals, 1)
+                num_test_proposals = self.num_test_proposals * num_known_boxes
 
-                    if self.known_noise_level > 0:
-                        # Add initial noise to known boxes
-                        noise_init = (
-                            torch.randn(x_known.shape[0], 4, device=self.device)
-                            * self.known_noise_level
+                # Forward diffusion to add noise (vectorized for all batch items)
+                w = images_whwh[:, 0:1]  # (batch, 1) for broadcasting
+                h = images_whwh[:, 1:2]  # (batch, 1) for broadcasting
+                x_known = box_normalize_xyxy(x_known, w=w, h=h)
+                x_known = box_xyxy_to_cxcywh(x_known)
+                x_known = (x_known * 2.0 - 1.0) * self.scale
+
+                if self.known_noise_level > 0:
+                    # Add initial noise to known boxes
+                    noise_init = (
+                        torch.randn(
+                            x_known.shape[0], x_known.shape[1], 4, device=self.device
                         )
-                        x_known += noise_init
-
-                    noise = torch.randn(x_known.shape[0], 4, device=self.device)
-                    x_known_noisy = self.q_sample(
-                        x_start=x_known,
-                        t=torch.full(
-                            (x_known.shape[0],),
-                            times[0],
-                            device=self.device,
-                        ),
-                        noise=noise,
+                        * self.known_noise_level
                     )
-
-                    x_known_noisy = torch.clamp(
-                        x_known_noisy, min=-1 * self.scale, max=self.scale
-                    )
-                    x_known_noisy = ((x_known_noisy / self.scale) + 1) / 2.0
-
-                    # Insert noisy known boxes into x
-                    assert (
-                        num_test_proposals <= self.num_proposals
-                    ), "num_test_proposals must be <= num_proposals"
-                    x[i, :num_test_proposals, :] = x_known_noisy
+                    x_known += noise_init
 
         ensemble_score, ensemble_label, ensemble_coord = [], [], []
         x_start = None
@@ -931,6 +909,33 @@ class DiffusionWYK(DiffusionDetBase):
 
             time_cond = torch.full((batch,), time, device=self.device, dtype=torch.long)
             self_cond = x_start if self.self_condition else None
+
+            # Flatten batch and box dimensions for q_sample
+            x_known_flat = x_known.reshape(-1, 4)
+            noise = torch.randn_like(x_known_flat)
+            times_cond = torch.full(
+                (x_known_flat.shape[0],),
+                time,
+                device=self.device,
+                dtype=torch.long,
+            )
+            x_known_noisy_flat = self.q_sample(
+                x_start=x_known_flat,
+                t=times_cond,
+                noise=noise,
+            )
+            x_known_noisy = x_known_noisy_flat.reshape(batch, num_test_proposals, 4)
+
+            x_known_noisy = torch.clamp(
+                x_known_noisy, min=-1 * self.scale, max=self.scale
+            )
+            # x_known_noisy = ((x_known_noisy / self.scale) + 1) / 2.0
+
+            # Insert noisy known boxes into x for all batch items
+            assert (
+                num_test_proposals <= self.num_proposals
+            ), "num_test_proposals must be <= num_proposals"
+            x[:, :num_test_proposals, :] = x_known_noisy
 
             preds, outputs_class, outputs_coord = self.model_predictions(
                 backbone_feats,
@@ -950,10 +955,11 @@ class DiffusionWYK(DiffusionDetBase):
                 threshold = 0.5
                 score_per_image = torch.sigmoid(score_per_image)
                 value, _ = torch.max(score_per_image, -1, keepdim=False)
-                keep_idx = (value > threshold) | (
-                    torch.arange(x.shape[1], dtype=torch.long, device=x.device)
-                    < self.num_test_proposals
-                )  # keep all boxes above threshold, plus the known boxes (first num_test_proposals entries)
+                keep_idx = value > threshold
+                # | (
+                #     torch.arange(x.shape[1], dtype=torch.long, device=x.device)
+                #     < num_test_proposals
+                # )  # keep all boxes above threshold, plus the known boxes (first num_test_proposals entries)
 
                 num_remain = torch.sum(keep_idx)
 
