@@ -911,31 +911,32 @@ class DiffusionWYK(DiffusionDetBase):
             self_cond = x_start if self.self_condition else None
 
             # Flatten batch and box dimensions for q_sample
-            x_known_flat = x_known.reshape(-1, 4)
-            noise = torch.randn_like(x_known_flat)
-            times_cond = torch.full(
-                (x_known_flat.shape[0],),
-                time,
-                device=self.device,
-                dtype=torch.long,
-            )
-            x_known_noisy_flat = self.q_sample(
-                x_start=x_known_flat,
-                t=times_cond,
-                noise=noise,
-            )
-            x_known_noisy = x_known_noisy_flat.reshape(batch, num_test_proposals, 4)
+            if self.num_known_test > 0 and self.num_test_proposals > 0:
+                x_known_flat = x_known.reshape(-1, 4)
+                noise = torch.randn_like(x_known_flat)
+                times_cond = torch.full(
+                    (x_known_flat.shape[0],),
+                    time,
+                    device=self.device,
+                    dtype=torch.long,
+                )
+                x_known_noisy_flat = self.q_sample(
+                    x_start=x_known_flat,
+                    t=times_cond,
+                    noise=noise,
+                )
+                x_known_noisy = x_known_noisy_flat.reshape(batch, num_test_proposals, 4)
 
-            x_known_noisy = torch.clamp(
-                x_known_noisy, min=-1 * self.scale, max=self.scale
-            )
-            # x_known_noisy = ((x_known_noisy / self.scale) + 1) / 2.0
+                x_known_noisy = torch.clamp(
+                    x_known_noisy, min=-1 * self.scale, max=self.scale
+                )
+                # x_known_noisy = ((x_known_noisy / self.scale) + 1) / 2.0
 
-            # Insert noisy known boxes into x for all batch items
-            assert (
-                num_test_proposals <= self.num_proposals
-            ), "num_test_proposals must be <= num_proposals"
-            x[:, :num_test_proposals, :] = x_known_noisy
+                # Insert noisy known boxes into x for all batch items
+                assert (
+                    num_test_proposals <= self.num_proposals
+                ), "num_test_proposals must be <= num_proposals"
+                x[:, :num_test_proposals, :] = x_known_noisy
 
             preds, outputs_class, outputs_coord = self.model_predictions(
                 backbone_feats,
