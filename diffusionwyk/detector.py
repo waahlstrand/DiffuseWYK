@@ -675,6 +675,7 @@ class DiffusionWYK(DiffusionDetBase):
 
         # Prepare Proposals.
         if not self.training:
+
             results = self.ddim_sample(batched_inputs, features, images_whwh, images)
 
             return results
@@ -880,11 +881,11 @@ class DiffusionWYK(DiffusionDetBase):
         # Add a distribution of noisy known boxes into img at each step
         if self.num_known_test > 0 and self.num_test_proposals > 0:
             num_known_boxes = x_known_batch.shape[1]
+            num_test_proposals = self.num_test_proposals * num_known_boxes
 
-            if num_known_boxes > 0:
+            if num_test_proposals > 0:
                 # Repeat known boxes for all batch items: (batch, num_known, 4) -> (batch, num_known * num_test_proposals, 4)
                 x_known = x_known_batch.repeat(1, self.num_test_proposals, 1)
-                num_test_proposals = self.num_test_proposals * num_known_boxes
 
                 # Forward diffusion to add noise (vectorized for all batch items)
                 w = images_whwh[:, 0:1]  # (batch, 1) for broadcasting
@@ -911,7 +912,7 @@ class DiffusionWYK(DiffusionDetBase):
             self_cond = x_start if self.self_condition else None
 
             # Flatten batch and box dimensions for q_sample
-            if self.num_known_test > 0 and self.num_test_proposals > 0:
+            if self.num_known_test > 0 and num_test_proposals > 0:
                 x_known_flat = x_known.reshape(-1, 4)
                 noise = torch.randn_like(x_known_flat)
                 times_cond = torch.full(
