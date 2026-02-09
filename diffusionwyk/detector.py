@@ -911,6 +911,30 @@ class DiffusionWYK(DiffusionDetBase):
                 )
                 x_known += noise_init
 
+        if x_known is not None:
+
+            noise_known = torch.randn_like(x_known)
+            times_cond = torch.full(
+                (batch,),
+                times[0],
+                device=self.device,
+                dtype=torch.long,
+            )
+            x_known_noisy = self.q_sample(
+                x_start=x_known,
+                t=times_cond,
+                noise=noise_known * 0.1,
+            )
+            # x_known_noisy = x_known  # if you want to use the original known boxes without noise, just set x_known_noisy to x_known
+
+            # Insert noisy known boxes into x for all batch items
+            assert (
+                num_test_proposals <= self.num_proposals
+            ), "num_test_proposals must be <= num_proposals"
+            x[:, :num_test_proposals, :] = x_known_noisy.view(
+                batch, num_test_proposals, 4
+            )
+
         ensemble_score, ensemble_label, ensemble_coord = [], [], []
         x_start = None
         for time, time_next in time_pairs:
@@ -919,29 +943,6 @@ class DiffusionWYK(DiffusionDetBase):
             self_cond = x_start if self.self_condition else None
 
             # Flatten batch and box dimensions for q_sample
-            if x_known is not None:
-
-                noise_known = torch.randn_like(x_known)
-                times_cond = torch.full(
-                    (batch,),
-                    time,
-                    device=self.device,
-                    dtype=torch.long,
-                )
-                x_known_noisy = self.q_sample(
-                    x_start=x_known,
-                    t=times_cond,
-                    noise=noise_known * 0.1,
-                )
-                # x_known_noisy = x_known  # if you want to use the original known boxes without noise, just set x_known_noisy to x_known
-
-                # Insert noisy known boxes into x for all batch items
-                assert (
-                    num_test_proposals <= self.num_proposals
-                ), "num_test_proposals must be <= num_proposals"
-                x[:, :num_test_proposals, :] = x_known_noisy.view(
-                    batch, num_test_proposals, 4
-                )
 
             # # Debugging
             # x_boxes = torch.clamp(x, min=-1 * self.scale, max=self.scale)
@@ -961,6 +962,8 @@ class DiffusionWYK(DiffusionDetBase):
                 clip_x_start=clip_denoised,
             )
             pred_noise, x_start = preds.pred_noise, preds.pred_x_start
+
+            #
 
             if self.box_renewal:  # filter
                 score_per_image, box_per_image = (
