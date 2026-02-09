@@ -882,28 +882,28 @@ class DiffusionWYK(DiffusionDetBase):
         num_test_proposals = self.num_test_proposals * num_known_boxes
 
         # Add a distribution of noisy known boxes into img at each step
+        x_known = None
         if self.num_known_test > 0 and num_test_proposals > 0:
 
-            if num_test_proposals > 0:
-                # Repeat known boxes for all batch items: (batch, num_known, 4) -> (batch, num_known * num_test_proposals, 4)
-                x_known = x_known_batch.repeat(1, self.num_test_proposals, 1)
+            # Repeat known boxes for all batch items: (batch, num_known, 4) -> (batch, num_known * num_test_proposals, 4)
+            x_known = x_known_batch.repeat(1, self.num_test_proposals, 1)
 
-                # Forward diffusion to add noise (vectorized for all batch items)
-                w = images_whwh[:, 0:1]  # (batch, 1) for broadcasting
-                h = images_whwh[:, 1:2]  # (batch, 1) for broadcasting
-                x_known = box_normalize_xyxy(x_known, w=w, h=h)
-                x_known = box_xyxy_to_cxcywh(x_known)
-                x_known = (x_known * 2.0 - 1.0) * self.scale
+            # Forward diffusion to add noise (vectorized for all batch items)
+            x_known = x_known / images_whwh[:, None, :].repeat(
+                1, self.num_test_proposals, 1
+            )  # scale to [0,1]
+            x_known = box_xyxy_to_cxcywh(x_known)
+            x_known = (x_known * 2.0 - 1.0) * self.scale
 
-                if self.known_noise_level > 0:
-                    # Add initial noise to known boxes
-                    noise_init = (
-                        torch.randn(
-                            x_known.shape[0], x_known.shape[1], 4, device=self.device
-                        )
-                        * self.known_noise_level
+            if self.known_noise_level > 0:
+                # Add initial noise to known boxes
+                noise_init = (
+                    torch.randn(
+                        x_known.shape[0], x_known.shape[1], 4, device=self.device
                     )
-                    x_known += noise_init
+                    * self.known_noise_level
+                )
+                x_known += noise_init
 
         ensemble_score, ensemble_label, ensemble_coord = [], [], []
         x_start = None
@@ -913,17 +913,17 @@ class DiffusionWYK(DiffusionDetBase):
             self_cond = x_start if self.self_condition else None
 
             # Flatten batch and box dimensions for q_sample
-            if self.num_known_test > 0 and num_test_proposals > 0:
-                x_known_flat = x_known.reshape(-1, 4)
-                noise = torch.randn_like(x_known_flat)
+            if x_known is not None:
+
+                noise = torch.randn_like(x_known)
                 times_cond = torch.full(
-                    (x_known_flat.shape[0],),
+                    (batch,),
                     time,
                     device=self.device,
                     dtype=torch.long,
                 )
                 x_known_noisy = self.q_sample(
-                    x_start=x_known_flat,
+                    x_start=x_known,
                     t=times_cond,
                     noise=noise,
                 )
