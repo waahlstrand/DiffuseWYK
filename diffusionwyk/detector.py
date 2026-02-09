@@ -875,11 +875,16 @@ class DiffusionWYK(DiffusionDetBase):
             ]
 
         x_known_batch = torch.stack(x_known_batch)
+        # print(f"Time 000: {x_known_batch}")
         # Randomly initialize the starting boxes as standard normal
         x = torch.randn(shape, device=self.device)
 
         num_known_boxes = x_known_batch.shape[1]
+        # print(x_known_batch.shape)
         num_test_proposals = self.num_test_proposals * num_known_boxes
+        # print(
+        #     f"Number of known boxes: {num_known_boxes}, num_test_proposals: {num_test_proposals}"
+        # )
 
         # Add a distribution of noisy known boxes into img at each step
         x_known = None
@@ -915,7 +920,7 @@ class DiffusionWYK(DiffusionDetBase):
             # Flatten batch and box dimensions for q_sample
             if x_known is not None:
 
-                noise = torch.randn_like(x_known)
+                noise_known = torch.randn_like(x_known)
                 times_cond = torch.full(
                     (batch,),
                     time,
@@ -925,8 +930,9 @@ class DiffusionWYK(DiffusionDetBase):
                 x_known_noisy = self.q_sample(
                     x_start=x_known,
                     t=times_cond,
-                    noise=noise,
+                    noise=noise_known * 0.1,
                 )
+                # x_known_noisy = x_known  # if you want to use the original known boxes without noise, just set x_known_noisy to x_known
 
                 # Insert noisy known boxes into x for all batch items
                 assert (
@@ -935,6 +941,15 @@ class DiffusionWYK(DiffusionDetBase):
                 x[:, :num_test_proposals, :] = x_known_noisy.view(
                     batch, num_test_proposals, 4
                 )
+
+            # Debugging
+            x_boxes = torch.clamp(x, min=-1 * self.scale, max=self.scale)
+            x_boxes = ((x_boxes / self.scale) + 1) / 2
+            x_boxes = box_cxcywh_to_xyxy(x_boxes)
+            x_boxes = x_boxes * images_whwh[:, None, :]
+
+            # Print the known boxes for debugging
+            # print(f"Time {time}: {x_boxes[:, :num_test_proposals, :]}")
 
             preds, outputs_class, outputs_coord = self.model_predictions(
                 backbone_feats,
@@ -954,11 +969,10 @@ class DiffusionWYK(DiffusionDetBase):
                 threshold = 0.5
                 score_per_image = torch.sigmoid(score_per_image)
                 value, _ = torch.max(score_per_image, -1, keepdim=False)
-                keep_idx = value > threshold
-                # | (
-                #     torch.arange(x.shape[1], dtype=torch.long, device=x.device)
-                #     < num_test_proposals
-                # )  # keep all boxes above threshold, plus the known boxes (first num_test_proposals entries)
+                keep_idx = (value > threshold) | (
+                    torch.arange(x.shape[1], dtype=torch.long, device=x.device)
+                    < num_test_proposals
+                )  # keep all boxes above threshold, plus the known boxes (first num_test_proposals entries)
 
                 num_remain = torch.sum(keep_idx)
 
