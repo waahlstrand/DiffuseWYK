@@ -647,6 +647,8 @@ class DiffusionWYK(DiffusionDetBase):
         self.num_test_proposals = cfg.MODEL.DiffusionWYK.NUM_TEST_PROPOSALS
         self.ddim_sampling_eta = cfg.MODEL.DiffusionWYK.ETA
 
+        self.num_proposals_base = self.num_proposals
+
     def forward(self, batched_inputs, do_postprocess=True):
         """
         Args:
@@ -843,6 +845,9 @@ class DiffusionWYK(DiffusionDetBase):
             self.ddim_sampling_eta,
             self.objective,
         )
+        self.num_proposals = (
+            self.num_proposals_base
+        )  # reset num_proposals to base value before sampling
 
         # [-1, 0, 1, 2, ..., T-1] when sampling_timesteps == total_timesteps
         times = torch.linspace(-1, total_timesteps - 1, steps=sampling_timesteps + 1)
@@ -875,16 +880,12 @@ class DiffusionWYK(DiffusionDetBase):
             ]
 
         x_known_batch = torch.stack(x_known_batch)
-        # print(f"Time 000: {x_known_batch}")
-        # Randomly initialize the starting boxes as standard normal
-        x = torch.randn(shape, device=self.device)
-
         num_known_boxes = x_known_batch.shape[1]
-        # print(x_known_batch.shape)
         num_test_proposals = self.num_test_proposals * num_known_boxes
-        # print(
-        #     f"Number of known boxes: {num_known_boxes}, num_test_proposals: {num_test_proposals}"
-        # )
+
+        # Randomly initialize the starting boxes as standard normal
+        self.num_proposals += num_test_proposals
+        x = torch.randn((batch, self.num_proposals, 4), device=self.device)
 
         # Add a distribution of noisy known boxes into img at each step
         x_known = None
@@ -942,14 +943,14 @@ class DiffusionWYK(DiffusionDetBase):
                     batch, num_test_proposals, 4
                 )
 
-            # Debugging
-            x_boxes = torch.clamp(x, min=-1 * self.scale, max=self.scale)
-            x_boxes = ((x_boxes / self.scale) + 1) / 2
-            x_boxes = box_cxcywh_to_xyxy(x_boxes)
-            x_boxes = x_boxes * images_whwh[:, None, :]
+            # # Debugging
+            # x_boxes = torch.clamp(x, min=-1 * self.scale, max=self.scale)
+            # x_boxes = ((x_boxes / self.scale) + 1) / 2
+            # x_boxes = box_cxcywh_to_xyxy(x_boxes)
+            # x_boxes = x_boxes * images_whwh[:, None, :]
 
-            # Print the known boxes for debugging
-            # print(f"Time {time}: {x_boxes[:, :num_test_proposals, :]}")
+            # # Print the known boxes for debugging
+            # # print(f"Time {time}: {x_boxes[:, :num_test_proposals, :]}")
 
             preds, outputs_class, outputs_coord = self.model_predictions(
                 backbone_feats,
@@ -1008,7 +1009,9 @@ class DiffusionWYK(DiffusionDetBase):
                 )
             if self.use_ensemble and self.sampling_timesteps > 1:
                 box_pred_per_image, scores_per_image, labels_per_image = self.inference(
-                    outputs_class[-1], outputs_coord[-1], images.image_sizes
+                    outputs_class[-1],
+                    outputs_coord[-1],
+                    images.image_sizes,
                 )
                 ensemble_score.append(scores_per_image)
                 ensemble_label.append(labels_per_image)
@@ -1036,7 +1039,11 @@ class DiffusionWYK(DiffusionDetBase):
             output = {"pred_logits": outputs_class[-1], "pred_boxes": outputs_coord[-1]}
             box_cls = output["pred_logits"]
             box_pred = output["pred_boxes"]
-            results = self.inference(box_cls, box_pred, images.image_sizes)
+            results = self.inference(
+                box_cls,
+                box_pred,
+                images.image_sizes,
+            )
         if do_postprocess:
             processed_results = []
             for results_per_image, input_per_image, image_size in zip(
