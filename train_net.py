@@ -134,8 +134,8 @@ class Trainer(DefaultTrainer):
         if "lvis" in dataset_name:
             return LVISEvaluator(dataset_name, cfg, True, output_folder)
         else:
-            # return COCOEvaluator(dataset_name, cfg, True, output_folder)
-            return KnownBoxFilteredCOCOEvaluator(dataset_name, cfg, True, output_folder)
+            return COCOEvaluator(dataset_name, cfg, True, output_folder)
+            # return KnownBoxFilteredCOCOEvaluator(dataset_name, cfg, True, output_folder)
 
     @classmethod
     def build_train_loader(cls, cfg):
