@@ -890,7 +890,7 @@ class DiffusionWYK(DiffusionDetBase):
 
             # Forward diffusion to add noise (vectorized for all batch items)
             x_known = x_known / images_whwh[:, None, :].repeat(
-                1, self.num_test_proposals, 1
+                1, num_test_proposals, 1
             )  # scale to [0,1]
             x_known = box_xyxy_to_cxcywh(x_known)
             x_known = (x_known * 2.0 - 1.0) * self.scale
